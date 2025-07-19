@@ -3,14 +3,83 @@
 <head>
     <title>VIN Decoder</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .form-group { margin-bottom: 15px; }
-        input[type="text"] { padding: 8px; width: 300px; }
-        button { padding: 8px 15px; background: #007bff; color: white; border: none; cursor: pointer; }
-        .result { margin-top: 20px; padding: 15px; border: 1px solid #ddd; }
-        .error { color: red; }
-        .equipment-list { list-style-type: none; padding: 0; }
-        .equipment-list li { padding: 5px 0; border-bottom: 1px solid #eee; }
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 1000px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            line-height: 1.6;
+        }
+        .form-group { 
+            margin-bottom: 15px; 
+        }
+        input[type="text"] { 
+            padding: 8px; 
+            width: 300px; 
+            font-size: 16px;
+        }
+        button { 
+            padding: 10px 20px; 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result { 
+            margin-top: 30px; 
+            padding: 20px; 
+            border: 1px solid #ddd; 
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        .error { 
+            color: red; 
+            padding: 10px;
+            background: #ffeeee;
+            border-radius: 4px;
+        }
+        .vehicle-info {
+            background: #eef7ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .sa-code {
+            display: inline-block;
+            min-width: 60px;
+            font-weight: bold;
+            color: #1976d2;
+        }
+        .equipment-list {
+            list-style-type: none;
+            padding: 0;
+            column-count: 2;
+            column-gap: 30px;
+        }
+        .equipment-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            break-inside: avoid;
+        }
+        h3 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 5px;
+        }
+        .time {
+            color: #666;
+            font-style: italic;
+        }
+        @media (max-width: 768px) {
+            .equipment-list {
+                column-count: 1;
+            }
+        }
     </style>
 </head>
 <body>
@@ -27,21 +96,32 @@
     <div class="result">
         {% if result.success %}
             <h3>Resultat för VIN: {{ result.vin }}</h3>
-            <p>Hämtad på {{ result.time }} sekunder</p>
+            <p class="time">Hämtad på {{ result.time }} sekunder</p>
             
-            <h4>Utrustning:</h4>
+            <div class="vehicle-info">
+                <p><strong>Tillverkare:</strong> {{ result.vehicle_info.brand }}</p>
+                <p><strong>Modell:</strong> {{ result.vehicle_info.model }}</p>
+                <p><strong>Årsmodell:</strong> {{ result.vehicle_info.year }}</p>
+            </div>
+            
+            <h4>Utrustningskoder (SA-koder):</h4>
             <ul class="equipment-list">
-                {% for item in result.equipment %}
-                    <li>{{ item }}</li>
+                {% for code in result.sa_codes %}
+                    <li>
+                        <span class="sa-code">{{ code.code }}</span>
+                        {{ code.description }}
+                    </li>
                 {% else %}
-                    <li>Ingen utrustning hittades</li>
+                    <li>Inga utrustningskoder hittades</li>
                 {% endfor %}
             </ul>
         {% else %}
-            <p class="error">Fel: {{ result.error }}</p>
-            {% if result.time > 0 %}
-                <p>Försöket tog {{ result.time }} sekunder</p>
-            {% endif %}
+            <div class="error">
+                <p>Fel: {{ result.error }}</p>
+                {% if result.time > 0 %}
+                    <p class="time">Försöket tog {{ result.time }} sekunder</p>
+                {% endif %}
+            </div>
         {% endif %}
     </div>
     {% endif %}
