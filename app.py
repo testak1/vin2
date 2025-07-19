@@ -1,27 +1,33 @@
 import random
 import time
+import os
 from flask import Flask, render_template, request
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException
 
 app = Flask(__name__)
 
 # Configuration
-REQUEST_DELAY = (3, 7)  # Polite delay between requests
+REQUEST_DELAY = (3, 7)  # Random delay between 3-7 seconds
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 ]
 
 def get_chrome_driver():
-    import chromedriver_autoinstaller
-    from selenium.webdriver.chrome.options import Options
-    
-    # Setup Chrome options
+    """Configure and return a Chrome WebDriver instance"""
     options = Options()
+    
+    # Use Render's pre-installed Chrome
+    options.binary_location = os.getenv('CHROME_BIN', '/opt/render/.cache/chromium/chrome')
+    
+    # Headless configuration
     options.add_argument("--headless")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
@@ -29,24 +35,22 @@ def get_chrome_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     
-    # Install and get ChromeDriver path
-    chromedriver_path = chromedriver_autoinstaller.install()
-    
-    # Create driver
-    driver = webdriver.Chrome(
-        executable_path=chromedriver_path,
-        options=options
+    # Use Render's ChromeDriver
+    service = Service(
+        executable_path=os.getenv('CHROMEDRIVER_PATH', '/opt/render/.cache/chromium/chromedriver')
     )
-    return driver
+    
+    return webdriver.Chrome(service=service, options=options)
 
 def parse_html(html):
+    """Parse the HTML content and extract vehicle information"""
     soup = BeautifulSoup(html, 'html.parser')
     
     # Vehicle Info
     vehicle_info = {
-        'brand': soup.select_one('table.table-hover tr:nth-of-type(4) td:nth-of-type(2)').get_text(strip=True),
-        'model': soup.select_one('table.table-hover tr:nth-of-type(6) td:nth-of-type(2)').get_text(strip=True),
-        'year': soup.select_one('h2 strong').get_text().split()[-1] if soup.select_one('h2 strong') else None
+        'brand': safe_extract(soup, 'table.table-hover tr:nth-of-type(4) td:nth-of-type(2)'),
+        'model': safe_extract(soup, 'table.table-hover tr:nth-of-type(6) td:nth-of-type(2)'),
+        'year': safe_extract(soup, 'h2 strong', lambda x: x.get_text().split()[-1])
     }
     
     # SA Codes
@@ -66,31 +70,44 @@ def parse_html(html):
         'sa_codes': sa_codes
     }
 
+def safe_extract(soup, selector, transform=None):
+    """Safely extract text from a BeautifulSoup selector"""
+    try:
+        element = soup.select_one(selector)
+        if element:
+            return transform(element) if transform else element.get_text(strip=True)
+    except:
+        pass
+    return None
+
 def scrape_vin_data(vin):
+    """Scrape vehicle data from VIN decoder website"""
     start_time = time.time()
     result = None
-    
-    # Be polite with delays
-    time.sleep(random.uniform(*REQUEST_DELAY))
-    
     driver = None
+    
     try:
+        # Respectful delay
+        time.sleep(random.uniform(*REQUEST_DELAY))
+        
         driver = get_chrome_driver()
-        driver.get(f"https://www.vindecoderz.com/EN/check-lookup/{vin}")
+        url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
+        driver.get(url)
         
-        # Wait for page to load
-        time.sleep(5)
-        
-        # Check for Cloudflare challenge
-        if "Checking your browser" in driver.page_source:
-            # If challenge detected, wait longer
-            time.sleep(10)
+        # Wait for page to load or Cloudflare challenge
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-hover"))
+            )
+        except TimeoutException:
+            if "Checking your browser" in driver.page_source:
+                raise Exception("Cloudflare challenge detected")
+            raise Exception("Page load timeout")
         
         html = driver.page_source
         result = parse_html(html)
         
     except Exception as e:
-        print(f"Scraping error: {str(e)}")
         return {
             'success': False,
             'error': str(e),
@@ -101,26 +118,17 @@ def scrape_vin_data(vin):
         if driver:
             driver.quit()
     
-    elapsed_time = time.time() - start_time
-    
-    if result:
-        return {
-            'success': True,
-            'vehicle_info': result['vehicle_info'],
-            'sa_codes': result['sa_codes'],
-            'time': round(elapsed_time, 2),
-            'vin': vin
-        }
-    else:
-        return {
-            'success': False,
-            'error': "Failed to retrieve data. Website protections may be blocking us.",
-            'time': round(elapsed_time, 2),
-            'vin': vin
-        }
+    return {
+        'success': True,
+        'vehicle_info': result['vehicle_info'],
+        'sa_codes': result['sa_codes'],
+        'time': round(time.time() - start_time, 2),
+        'vin': vin
+    }
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    """Handle the main page requests"""
     result = None
     if request.method == 'POST':
         vin = request.form.get('vin', '').strip()
