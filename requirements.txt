@@ -1,4 +1,4 @@
 flask==2.3.2
 beautifulsoup4==4.12.2
-cloudscraper==1.2.68
+requests==2.31.0
 waitress==2.1.2
