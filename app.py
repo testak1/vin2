@@ -6,11 +6,12 @@ from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from webdriver_manager.firefox import GeckoDriverManager
+import os
 
 app = Flask(__name__)
 
 # Configuration
-REQUEST_DELAY = (3, 7)  # Random delay between 3-7 seconds
+REQUEST_DELAY = (5, 10)  # More conservative delay between requests
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/115.0'
@@ -19,11 +20,20 @@ USER_AGENTS = [
 def get_firefox_driver():
     """Configure and return a Firefox WebDriver instance"""
     options = Options()
+    
+    # Set explicit binary path for Render
+    options.binary_location = '/usr/bin/firefox'
+    
     options.add_argument("--headless")
     options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+    options.add_argument("--width=1920")
+    options.add_argument("--height=1080")
     
-    # Automatic GeckoDriver installation
-    service = Service(GeckoDriverManager().install())
+    # Automatic GeckoDriver installation with cache
+    service = Service(
+        GeckoDriverManager(cache_valid_range=30).install(),
+        log_path=os.devnull  # Disable geckodriver logs
+    )
     
     return webdriver.Firefox(service=service, options=options)
 
@@ -80,7 +90,11 @@ def scrape_vin_data(vin):
         driver.get(url)
         
         # Wait for page to load
-        time.sleep(5)
+        time.sleep(8)  # Increased wait time for Cloudflare
+        
+        # Check for Cloudflare challenge
+        if "Checking your browser" in driver.page_source:
+            time.sleep(10)  # Additional wait if challenge detected
         
         html = driver.page_source
         result = parse_html(html)
@@ -107,7 +121,7 @@ def scrape_vin_data(vin):
     else:
         return {
             'success': False,
-            'error': "Failed to retrieve data",
+            'error': "Failed to retrieve data after multiple attempts",
             'time': round(time.time() - start_time, 2),
             'vin': vin
         }
