@@ -1,7 +1,6 @@
 import random
 import time
 from flask import Flask, render_template, request
-import cloudscraper
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -11,22 +10,24 @@ from webdriver_manager.chrome import ChromeDriverManager
 app = Flask(__name__)
 
 # Configuration
-REQUEST_DELAY = (3, 7)  # More polite delay range
-MAX_RETRIES = 2
+REQUEST_DELAY = (3, 7)  # Polite delay between requests
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0'
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 ]
 
-def get_random_headers():
-    return {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.vindecoderz.com/',
-        'DNT': '1',
-        'Accept': 'text/html,application/xhtml+xml'
-    }
+def get_chrome_driver():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    return driver
 
 def parse_html(html):
     soup = BeautifulSoup(html, 'html.parser')
@@ -55,75 +56,40 @@ def parse_html(html):
         'sa_codes': sa_codes
     }
 
-def scrape_with_cloudscraper(vin):
-    scraper = cloudscraper.create_scraper(
-        interpreter='nodejs',
-        delay=10,
-        browser={
-            'browser': 'firefox',
-            'platform': 'linux',
-            'desktop': True
-        }
-    )
-    
-    try:
-        response = scraper.get(
-            f"https://www.vindecoderz.com/EN/check-lookup/{vin}",
-            headers=get_random_headers(),
-            timeout=30
-        )
-        return response.text if response.status_code == 200 else None
-    except:
-        return None
-
-def scrape_with_selenium(vin):
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    
-    try:
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=options
-        )
-        driver.get(f"https://www.vindecoderz.com/EN/check-lookup/{vin}")
-        time.sleep(5)  # Allow page to load
-        html = driver.page_source
-        driver.quit()
-        return html
-    except Exception as e:
-        print(f"Selenium error: {str(e)}")
-        return None
-
 def scrape_vin_data(vin):
     start_time = time.time()
     result = None
-    method_used = None
     
     # Be polite with delays
     time.sleep(random.uniform(*REQUEST_DELAY))
     
-    # First try Cloudscraper
-    html = scrape_with_cloudscraper(vin)
-    if html:
-        try:
-            result = parse_html(html)
-            method_used = 'cloudscraper'
-        except Exception as e:
-            print(f"Cloudscraper parse error: {str(e)}")
-    
-    # If Cloudscraper fails, try Selenium
-    if not result:
-        html = scrape_with_selenium(vin)
-        if html:
-            try:
-                result = parse_html(html)
-                method_used = 'selenium'
-            except Exception as e:
-                print(f"Selenium parse error: {str(e)}")
+    driver = None
+    try:
+        driver = get_chrome_driver()
+        driver.get(f"https://www.vindecoderz.com/EN/check-lookup/{vin}")
+        
+        # Wait for page to load
+        time.sleep(5)
+        
+        # Check for Cloudflare challenge
+        if "Checking your browser" in driver.page_source:
+            # If challenge detected, wait longer
+            time.sleep(10)
+        
+        html = driver.page_source
+        result = parse_html(html)
+        
+    except Exception as e:
+        print(f"Scraping error: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'time': round(time.time() - start_time, 2),
+            'vin': vin
+        }
+    finally:
+        if driver:
+            driver.quit()
     
     elapsed_time = time.time() - start_time
     
@@ -133,13 +99,12 @@ def scrape_vin_data(vin):
             'vehicle_info': result['vehicle_info'],
             'sa_codes': result['sa_codes'],
             'time': round(elapsed_time, 2),
-            'vin': vin,
-            'method': method_used
+            'vin': vin
         }
     else:
         return {
             'success': False,
-            'error': "All scraping methods failed. Website protections are too strong.",
+            'error': "Failed to retrieve data. Website protections may be blocking us.",
             'time': round(elapsed_time, 2),
             'vin': vin
         }
