@@ -17,6 +17,10 @@ USER_AGENTS = [
 ]
 
 def get_chrome_driver():
+    import chromedriver_autoinstaller
+    from selenium.webdriver.chrome.options import Options
+    
+    # Setup Chrome options
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -25,8 +29,14 @@ def get_chrome_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    # Install and get ChromeDriver path
+    chromedriver_path = chromedriver_autoinstaller.install()
+    
+    # Create driver
+    driver = webdriver.Chrome(
+        executable_path=chromedriver_path,
+        options=options
+    )
     return driver
 
 def parse_html(html):
