@@ -1,46 +1,31 @@
 import random
 import time
-import os
 from flask import Flask, render_template, request
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
+from webdriver_manager.firefox import GeckoDriverManager
 
 app = Flask(__name__)
 
 # Configuration
 REQUEST_DELAY = (3, 7)  # Random delay between 3-7 seconds
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/115.0'
 ]
 
-def get_chrome_driver():
-    """Configure and return a Chrome WebDriver instance"""
+def get_firefox_driver():
+    """Configure and return a Firefox WebDriver instance"""
     options = Options()
-    
-    # Use Render's pre-installed Chrome
-    options.binary_location = os.getenv('CHROME_BIN', '/opt/render/.cache/chromium/chrome')
-    
-    # Headless configuration
     options.add_argument("--headless")
-    options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
     
-    # Use Render's ChromeDriver
-    service = Service(
-        executable_path=os.getenv('CHROMEDRIVER_PATH', '/opt/render/.cache/chromium/chromedriver')
-    )
+    # Automatic GeckoDriver installation
+    service = Service(GeckoDriverManager().install())
     
-    return webdriver.Chrome(service=service, options=options)
+    return webdriver.Firefox(service=service, options=options)
 
 def parse_html(html):
     """Parse the HTML content and extract vehicle information"""
@@ -90,19 +75,12 @@ def scrape_vin_data(vin):
         # Respectful delay
         time.sleep(random.uniform(*REQUEST_DELAY))
         
-        driver = get_chrome_driver()
+        driver = get_firefox_driver()
         url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
         driver.get(url)
         
-        # Wait for page to load or Cloudflare challenge
-        try:
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-hover"))
-            )
-        except TimeoutException:
-            if "Checking your browser" in driver.page_source:
-                raise Exception("Cloudflare challenge detected")
-            raise Exception("Page load timeout")
+        # Wait for page to load
+        time.sleep(5)
         
         html = driver.page_source
         result = parse_html(html)
@@ -118,13 +96,21 @@ def scrape_vin_data(vin):
         if driver:
             driver.quit()
     
-    return {
-        'success': True,
-        'vehicle_info': result['vehicle_info'],
-        'sa_codes': result['sa_codes'],
-        'time': round(time.time() - start_time, 2),
-        'vin': vin
-    }
+    if result:
+        return {
+            'success': True,
+            'vehicle_info': result['vehicle_info'],
+            'sa_codes': result['sa_codes'],
+            'time': round(time.time() - start_time, 2),
+            'vin': vin
+        }
+    else:
+        return {
+            'success': False,
+            'error': "Failed to retrieve data",
+            'time': round(time.time() - start_time, 2),
+            'vin': vin
+        }
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
