@@ -1,39 +1,44 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const path = require('path');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 puppeteer.use(StealthPlugin());
-
 app.use(express.json());
+app.use(express.static(path.join(__dirname)));
 
 app.post('/decode', async (req, res) => {
-    const { vin } = req.body;
+  const { vin } = req.body;
+  if (!vin) return res.status(400).json({ error: 'VIN missing' });
 
-    if (!vin) return res.status(400).send('VIN missing');
+  try {
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
 
-    try {
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+    const page = await browser.newPage();
+    const url = `https://www.vindecoderz.com/EN/check-lookup/${vin}`;
+    await page.goto(url, { waitUntil: 'networkidle2' });
 
-        const page = await browser.newPage();
-        await page.goto(`https://www.vindecoderz.com/EN/check-lookup/${vin}`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('.table.table-striped.table-hover', { timeout: 15000 });
 
-        // Example: wait and extract table
-        await page.waitForSelector('.panel-body'); // adjust selector as needed
-        const content = await page.content();
+    const equipment = await page.$$eval('.table.table-striped.table-hover tbody tr', rows => {
+      return rows.map(row => {
+        const code = row.querySelector('b')?.innerText || '';
+        const description = row.querySelectorAll('td')[1]?.innerText.trim() || '';
+        return { code, description };
+      }).filter(item => item.code && item.description);
+    });
 
-        await browser.close();
-        res.send(content); // or parse and extract structured data
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Error decoding VIN');
-    }
+    await browser.close();
+    res.json({ equipment });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch or parse data' });
+  }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Server is running on port ${PORT}`));
