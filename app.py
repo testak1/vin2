@@ -6,12 +6,26 @@ import time
 app = Flask(__name__)
 
 def scrape_vin_data(vin):
-    scraper = cloudscraper.create_scraper()
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'mobile': False
+        }
+    )
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.vindecoderz.com/'
+    }
+
     url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
     
     try:
         start_time = time.time()
-        response = scraper.get(url, timeout=30)
+        response = scraper.get(url, headers=headers, timeout=30)
         elapsed_time = time.time() - start_time
         
         if response.status_code == 200:
