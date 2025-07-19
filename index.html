@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <title>VIN Utrustningskoder</title>
+  <style>
+    body { font-family: Arial; max-width: 800px; margin: auto; padding: 2rem; }
+    input { padding: 10px; width: 300px; }
+    button { padding: 10px 20px; background: #007bff; color: #fff; border: none; cursor: pointer; }
+    table { border-collapse: collapse; margin-top: 2rem; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>VIN-avkodare</h1>
+  <form id="vinForm">
+    <label for="vin">Ange VIN-nummer:</label><br>
+    <input type="text" id="vin" required placeholder="t.ex. WDD2130891A444597" />
+    <button type="submit">Visa utrustning</button>
+  </form>
+
+  <div id="result"></div>
+
+  <script>
+    document.getElementById('vinForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const vin = document.getElementById('vin').value.trim();
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerHTML = "🔄 Hämtar data...";
+
+      const res = await fetch('/decode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vin })
+      });
+
+      if (!res.ok) {
+        resultDiv.innerHTML = "❌ Kunde inte hämta data.";
+        return;
+      }
+
+      const data = await res.json();
+      if (!data || !data.equipment) {
+        resultDiv.innerHTML = "❌ Ingen utrustningslista hittades.";
+        return;
+      }
+
+      let html = "<table><thead><tr><th>Kod</th><th>Beskrivning</th></tr></thead><tbody>";
+      for (const item of data.equipment) {
+        html += `<tr><td>${item.code}</td><td>${item.description}</td></tr>`;
+      }
+      html += "</tbody></table>";
+      resultDiv.innerHTML = html;
+    });
+  </script>
+</body>
+</html>
