@@ -1,13 +1,14 @@
+import os
 import random
 import time
 import requests
 from flask import Flask, render_template, request
 from bs4 import BeautifulSoup
-from waitress import serve
+from waitress import serve  # Production WSGI server
 
 app = Flask(__name__)
 
-# Webshare Proxies Configuration
+# Configuration
 PROXIES = [
     {"http": f"http://wtvsycnr:wwx5rwg1fooq@{ip}", 
      "https": f"http://wtvsycnr:wwx5rwg1fooq@{ip}"}
@@ -25,85 +26,47 @@ PROXIES = [
     ]
 ]
 
-# Healthy proxies cache
-HEALTHY_PROXIES = PROXIES.copy()
+# Production settings
+PORT = int(os.environ.get('PORT', 5000))  # Render provides PORT environment variable
+REQUEST_DELAY = (10, 30)  # Seconds between requests
 
-def check_proxy_health():
-    """Check and update healthy proxies list"""
-    global HEALTHY_PROXIES
-    working_proxies = []
-    
-    for proxy in PROXIES:
-        try:
-            start = time.time()
-            requests.get(
-                "https://api.ipify.org?format=json",
-                proxies=proxy,
-                timeout=10
-            )
-            working_proxies.append(proxy)
-            print(f"✅ Proxy {proxy['http']} works ({time.time()-start:.2f}s)")
-        except Exception as e:
-            print(f"❌ Proxy {proxy['http']} failed: {str(e)}")
-    
-    HEALTHY_PROXIES = working_proxies or PROXIES  # Fallback to all if none work
-    return len(working_proxies)
-
-def get_random_proxy():
-    """Get a random proxy from healthy ones"""
-    if not HEALTHY_PROXIES:
-        check_proxy_health()
-    return random.choice(HEALTHY_PROXIES)
-
-def scrape_with_proxy(vin, max_retries=3):
-    for attempt in range(max_retries):
-        proxy = get_random_proxy()
-        try:
-            # Random delay (10-30s) to avoid rate limiting
-            delay = random.uniform(10, 30)
-            print(f"Attempt {attempt+1}: Waiting {delay:.1f}s before request...")
-            time.sleep(delay)
-            
-            response = requests.get(
-                f"https://www.vindecoderz.com/EN/check-lookup/{vin}",
-                proxies=proxy,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                },
-                timeout=30
-            )
-            
-            if response.status_code == 403:
-                raise Exception("Cloudflare block (403 Forbidden)")
-            if "captcha" in response.text.lower():
-                raise Exception("CAPTCHA challenge detected")
-                
-            return response.text
-            
-        except Exception as e:
-            print(f"⚠️ Attempt {attempt+1} failed via {proxy['http']}: {str(e)}")
-            if attempt == max_retries - 1:
-                raise
+def get_proxy():
+    """Get a random proxy with logging"""
+    proxy = random.choice(PROXIES)
+    print(f"Using proxy: {proxy['http']}")
+    return proxy
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        vin = request.form['vin'].strip()
+        vin = request.form.get('vin', '').strip()
         if len(vin) >= 17:
             start_time = time.time()
             try:
-                html = scrape_with_proxy(vin)
-                soup = BeautifulSoup(html, 'html.parser')
+                # Respectful delay
+                time.sleep(random.uniform(*REQUEST_DELAY))
                 
-                # Parse your data here
-                data = {
-                    'success': True,
-                    'vin': vin,
-                    'time': round(time.time() - start_time, 2)
-                }
-                return render_template('result.html', result=data)
+                response = requests.get(
+                    f"https://www.vindecoderz.com/EN/check-lookup/{vin}",
+                    proxies=get_proxy(),
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    },
+                    timeout=30
+                )
                 
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    # Add your parsing logic here
+                    return render_template('result.html', 
+                        vin=vin,
+                        time=round(time.time() - start_time, 2))
+                else:
+                    return render_template('error.html', 
+                        error=f"HTTP Error {response.status_code}",
+                        time=round(time.time() - start_time, 2))
+                        
             except Exception as e:
                 return render_template('error.html', 
                     error=str(e),
@@ -112,8 +75,5 @@ def index():
     return render_template('index.html')
 
 if __name__ == '__main__':
-    # Initial proxy health check
-    print(f"Initial proxy check: {check_proxy_health()} working proxies")
-    
-    # Start production server
-    serve(app, host="0.0.0.0", port=5000)
+    print(f"Starting server on port {PORT}")
+    serve(app, host="0.0.0.0", port=PORT)  # Production server
