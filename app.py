@@ -3,6 +3,7 @@ import time
 import requests
 from flask import Flask, render_template, request
 from bs4 import BeautifulSoup
+from waitress import serve
 
 app = Flask(__name__)
 
@@ -24,103 +25,95 @@ PROXIES = [
     ]
 ]
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-]
+# Healthy proxies cache
+HEALTHY_PROXIES = PROXIES.copy()
+
+def check_proxy_health():
+    """Check and update healthy proxies list"""
+    global HEALTHY_PROXIES
+    working_proxies = []
+    
+    for proxy in PROXIES:
+        try:
+            start = time.time()
+            requests.get(
+                "https://api.ipify.org?format=json",
+                proxies=proxy,
+                timeout=10
+            )
+            working_proxies.append(proxy)
+            print(f"✅ Proxy {proxy['http']} works ({time.time()-start:.2f}s)")
+        except Exception as e:
+            print(f"❌ Proxy {proxy['http']} failed: {str(e)}")
+    
+    HEALTHY_PROXIES = working_proxies or PROXIES  # Fallback to all if none work
+    return len(working_proxies)
 
 def get_random_proxy():
-    return random.choice(PROXIES)
-
-def get_random_headers():
-    return {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.google.com/',
-        'DNT': '1'
-    }
+    """Get a random proxy from healthy ones"""
+    if not HEALTHY_PROXIES:
+        check_proxy_health()
+    return random.choice(HEALTHY_PROXIES)
 
 def scrape_with_proxy(vin, max_retries=3):
     for attempt in range(max_retries):
+        proxy = get_random_proxy()
         try:
-            proxy = get_random_proxy()
-            headers = get_random_headers()
-            
-            # Add random delay (10-20 seconds)
-            time.sleep(random.uniform(10, 20))
+            # Random delay (10-30s) to avoid rate limiting
+            delay = random.uniform(10, 30)
+            print(f"Attempt {attempt+1}: Waiting {delay:.1f}s before request...")
+            time.sleep(delay)
             
             response = requests.get(
                 f"https://www.vindecoderz.com/EN/check-lookup/{vin}",
                 proxies=proxy,
-                headers=headers,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                },
                 timeout=30
             )
             
             if response.status_code == 403:
                 raise Exception("Cloudflare block (403 Forbidden)")
-                
             if "captcha" in response.text.lower():
                 raise Exception("CAPTCHA challenge detected")
                 
             return response.text
             
         except Exception as e:
-            print(f"Attempt {attempt + 1} failed with proxy {proxy['http']}: {str(e)}")
+            print(f"⚠️ Attempt {attempt+1} failed via {proxy['http']}: {str(e)}")
             if attempt == max_retries - 1:
                 raise
 
-def parse_html(html):
-    soup = BeautifulSoup(html, 'html.parser')
-    
-    vehicle_info = {
-        'brand': safe_extract(soup, 'table.table-hover tr:nth-of-type(4) td:nth-of-type(2)'),
-        'model': safe_extract(soup, 'table.table-hover tr:nth-of-type(6) td:nth-of-type(2)'),
-        'year': safe_extract(soup, 'h2 strong', lambda x: x.get_text().split()[-1])
-    }
-    
-    sa_codes = []
-    sa_table = soup.select('div.section table.table-striped')
-    if len(sa_table) > 1:
-        for row in sa_table[1].select('tbody tr'):
-            cells = row.select('td')
-            if len(cells) >= 2:
-                sa_codes.append({
-                    'code': cells[0].get_text(strip=True),
-                    'description': cells[1].get_text(strip=True)
-                })
-    
-    return {'vehicle_info': vehicle_info, 'sa_codes': sa_codes}
-
-def safe_extract(soup, selector, transform=None):
-    try:
-        element = soup.select_one(selector)
-        return transform(element) if transform and element else element.get_text(strip=True) if element else None
-    except:
-        return None
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    result = None
     if request.method == 'POST':
-        vin = request.form.get('vin', '').strip()
+        vin = request.form['vin'].strip()
         if len(vin) >= 17:
+            start_time = time.time()
             try:
-                start_time = time.time()
                 html = scrape_with_proxy(vin)
-                data = parse_html(html)
-                result = {
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Parse your data here
+                data = {
                     'success': True,
-                    'data': data,
+                    'vin': vin,
                     'time': round(time.time() - start_time, 2)
                 }
+                return render_template('result.html', result=data)
+                
             except Exception as e:
-                result = {
-                    'success': False,
-                    'error': str(e),
-                    'time': 0
-                }
-    return render_template('index.html', result=result)
+                return render_template('error.html', 
+                    error=str(e),
+                    time=round(time.time() - start_time, 2))
+    
+    return render_template('index.html')
 
 if __name__ == '__main__':
-    app.run()
+    # Initial proxy health check
+    print(f"Initial proxy check: {check_proxy_health()} working proxies")
+    
+    # Start production server
+    serve(app, host="0.0.0.0", port=5000)
