@@ -1,41 +1,34 @@
 import random
 import time
+import requests
 from flask import Flask, render_template, request
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service
-from webdriver_manager.firefox import GeckoDriverManager
-import os
 
 app = Flask(__name__)
 
 # Configuration
-REQUEST_DELAY = (5, 10)  # More conservative delay between requests
+REQUEST_DELAY = (5, 10)  # Conservative delay between requests
 USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/115.0'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 ]
 
-def get_firefox_driver():
-    """Configure and return a Firefox WebDriver instance"""
-    options = Options()
+def make_request(url):
+    """Make a request with random delays and headers"""
+    time.sleep(random.uniform(*REQUEST_DELAY))
     
-    # Set explicit binary path for Render
-    options.binary_location = '/usr/bin/firefox'
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.vindecoderz.com/',
+        'DNT': '1'
+    }
     
-    options.add_argument("--headless")
-    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
-    options.add_argument("--width=1920")
-    options.add_argument("--height=1080")
-    
-    # Automatic GeckoDriver installation with cache
-    service = Service(
-        GeckoDriverManager(cache_valid_range=30).install(),
-        log_path=os.devnull  # Disable geckodriver logs
-    )
-    
-    return webdriver.Firefox(service=service, options=options)
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        return response
+    except Exception as e:
+        raise Exception(f"Request failed: {str(e)}")
 
 def parse_html(html):
     """Parse the HTML content and extract vehicle information"""
@@ -78,50 +71,32 @@ def safe_extract(soup, selector, transform=None):
 def scrape_vin_data(vin):
     """Scrape vehicle data from VIN decoder website"""
     start_time = time.time()
-    result = None
-    driver = None
     
     try:
-        # Respectful delay
-        time.sleep(random.uniform(*REQUEST_DELAY))
-        
-        driver = get_firefox_driver()
         url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
-        driver.get(url)
+        response = make_request(url)
         
-        # Wait for page to load
-        time.sleep(8)  # Increased wait time for Cloudflare
-        
-        # Check for Cloudflare challenge
-        if "Checking your browser" in driver.page_source:
-            time.sleep(10)  # Additional wait if challenge detected
-        
-        html = driver.page_source
-        result = parse_html(html)
-        
+        if response.status_code == 200:
+            result = parse_html(response.text)
+            return {
+                'success': True,
+                'vehicle_info': result['vehicle_info'],
+                'sa_codes': result['sa_codes'],
+                'time': round(time.time() - start_time, 2),
+                'vin': vin
+            }
+        else:
+            return {
+                'success': False,
+                'error': f"HTTP Error {response.status_code}",
+                'time': round(time.time() - start_time, 2),
+                'vin': vin
+            }
+            
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'time': round(time.time() - start_time, 2),
-            'vin': vin
-        }
-    finally:
-        if driver:
-            driver.quit()
-    
-    if result:
-        return {
-            'success': True,
-            'vehicle_info': result['vehicle_info'],
-            'sa_codes': result['sa_codes'],
-            'time': round(time.time() - start_time, 2),
-            'vin': vin
-        }
-    else:
-        return {
-            'success': False,
-            'error': "Failed to retrieve data after multiple attempts",
             'time': round(time.time() - start_time, 2),
             'vin': vin
         }
