@@ -10,35 +10,53 @@ def scrape_vin_data(vin):
     url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
     
     try:
-        start_time = time.time()
         response = scraper.get(url, timeout=30)
-        elapsed_time = time.time() - start_time
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Exempel på hur du kan extrahera data - anpassa selektorerna
-            equipment = []
-            equipment_elements = soup.select('.equipment-list li')
-            for item in equipment_elements:
-                equipment.append(item.text.strip())
+            # Extract basic vehicle info
+            vehicle_info = {
+                'brand': soup.select_one('table.table-hover tr:nth-of-type(4) td:nth-of-type(2)').get_text(strip=True),
+                'model': soup.select_one('table.table-hover tr:nth-of-type(6) td:nth-of-type(2)').get_text(strip=True),
+                'year': soup.select_one('h2 strong').get_text().split()[-1] if soup.select_one('h2 strong') else None
+            }
+            
+            # Extract SA codes (equipment)
+            sa_codes = []
+            sa_table = soup.select('div.section table.table-striped')
+            
+            # The main SA codes table is typically the second table with this class
+            if len(sa_table) > 1:
+                rows = sa_table[1].select('tbody tr')
+                for row in rows:
+                    cells = row.select('td')
+                    if len(cells) >= 2:
+                        code = cells[0].get_text(strip=True)
+                        description = cells[1].get_text(strip=True)
+                        sa_codes.append({
+                            'code': code,
+                            'description': description
+                        })
             
             return {
                 'success': True,
-                'equipment': equipment,
-                'time': round(elapsed_time, 2),
+                'vehicle_info': vehicle_info,
+                'sa_codes': sa_codes,
                 'vin': vin
             }
+            
         return {
             'success': False,
             'error': f"HTTP Error {response.status_code}",
-            'time': round(elapsed_time, 2)
+            'vin': vin
         }
+        
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'time': 0
+            'vin': vin
         }
 
 @app.route('/', methods=['GET', 'POST'])
