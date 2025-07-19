@@ -1,37 +1,32 @@
 import random
 import time
-import requests
+import cloudscraper
 from flask import Flask, render_template, request
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
 # Configuration
-REQUEST_DELAY = (5, 10)  # Conservative delay between requests
+REQUEST_DELAY = (10, 15)  # More conservative delay to avoid blocks
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 ]
 
-def make_request(url):
-    """Make a request with random delays and headers"""
-    time.sleep(random.uniform(*REQUEST_DELAY))
-    
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.vindecoderz.com/',
-        'DNT': '1'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        return response
-    except Exception as e:
-        raise Exception(f"Request failed: {str(e)}")
+def create_scraper():
+    """Create a Cloudflare-aware scraper"""
+    return cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        },
+        delay=10,
+        interpreter='nodejs'
+    )
 
 def parse_html(html):
-    """Parse the HTML content and extract vehicle information"""
+    """Parse the HTML content"""
     soup = BeautifulSoup(html, 'html.parser')
     
     # Vehicle Info
@@ -59,24 +54,37 @@ def parse_html(html):
     }
 
 def safe_extract(soup, selector, transform=None):
-    """Safely extract text from a BeautifulSoup selector"""
+    """Safe element extraction"""
     try:
         element = soup.select_one(selector)
-        if element:
-            return transform(element) if transform else element.get_text(strip=True)
+        return transform(element) if transform and element else element.get_text(strip=True) if element else None
     except:
-        pass
-    return None
+        return None
 
 def scrape_vin_data(vin):
-    """Scrape vehicle data from VIN decoder website"""
+    """Main scraping function"""
     start_time = time.time()
+    scraper = create_scraper()
     
     try:
-        url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
-        response = make_request(url)
+        time.sleep(random.uniform(*REQUEST_DELAY))
+        
+        headers = {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.vindecoderz.com/'
+        }
+        
+        response = scraper.get(
+            f"https://www.vindecoderz.com/EN/check-lookup/{vin}",
+            headers=headers,
+            timeout=30
+        )
         
         if response.status_code == 200:
+            if "Checking your browser" in response.text:
+                raise Exception("Cloudflare challenge detected")
+                
             result = parse_html(response.text)
             return {
                 'success': True,
@@ -86,12 +94,7 @@ def scrape_vin_data(vin):
                 'vin': vin
             }
         else:
-            return {
-                'success': False,
-                'error': f"HTTP Error {response.status_code}",
-                'time': round(time.time() - start_time, 2),
-                'vin': vin
-            }
+            raise Exception(f"HTTP Error {response.status_code}")
             
     except Exception as e:
         return {
@@ -103,7 +106,6 @@ def scrape_vin_data(vin):
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    """Handle the main page requests"""
     result = None
     if request.method == 'POST':
         vin = request.form.get('vin', '').strip()
