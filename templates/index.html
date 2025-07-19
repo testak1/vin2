@@ -118,7 +118,7 @@
         {% else %}
             <div class="error">
                 <p>Fel: {{ result.error }}</p>
-                {% if result.time > 0 %}
+                {% if result.time is defined and result.time > 0 %}
                     <p class="time">Försöket tog {{ result.time }} sekunder</p>
                 {% endif %}
             </div>
