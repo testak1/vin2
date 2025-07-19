@@ -10,7 +10,9 @@ def scrape_vin_data(vin):
     url = f"https://www.vindecoderz.com/EN/check-lookup/{vin}"
     
     try:
+        start_time = time.time()
         response = scraper.get(url, timeout=30)
+        elapsed_time = time.time() - start_time
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -26,7 +28,6 @@ def scrape_vin_data(vin):
             sa_codes = []
             sa_table = soup.select('div.section table.table-striped')
             
-            # The main SA codes table is typically the second table with this class
             if len(sa_table) > 1:
                 rows = sa_table[1].select('tbody tr')
                 for row in rows:
@@ -43,12 +44,14 @@ def scrape_vin_data(vin):
                 'success': True,
                 'vehicle_info': vehicle_info,
                 'sa_codes': sa_codes,
+                'time': round(elapsed_time, 2),  # Add this line
                 'vin': vin
             }
             
         return {
             'success': False,
             'error': f"HTTP Error {response.status_code}",
+            'time': round(elapsed_time, 2),  # Add this line
             'vin': vin
         }
         
@@ -56,6 +59,7 @@ def scrape_vin_data(vin):
         return {
             'success': False,
             'error': str(e),
+            'time': 0,  # Add this line
             'vin': vin
         }
 
@@ -67,6 +71,6 @@ def index():
         if len(vin) >= 17:
             result = scrape_vin_data(vin)
     return render_template('index.html', result=result)
-    
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
